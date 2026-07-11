@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- SMOOTH NAV LINK SCROLL ----
   document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-    anchor.addEventListener('click', function(e) {
+    anchor.addEventListener('click', function (e) {
       const href = this.getAttribute('href');
       if (href === '#') return;
       const target = document.querySelector(href);
@@ -265,6 +265,21 @@ document.addEventListener('DOMContentLoaded', () => {
   skillBars.forEach(bar => barObserver.observe(bar));
 
   // ---- CONTACT FORM ----
+  // Guard: warn clearly if the developer hasn't filled in supabase-config.js
+  const cfg = window.SUPABASE_CONFIG;
+  if (!cfg || cfg.url === 'YOUR_SUPABASE_PROJECT_URL') {
+    console.warn(
+      '%c[Contact Form] ⚠️  Supabase not configured.\n' +
+      'Open supabase-config.js and fill in your project URL and anon key.',
+      'color: #f59e0b; font-weight: bold;'
+    );
+  }
+
+  // Initialise Supabase client (supabase-js v2 UMD exposes window.supabase)
+  const supabaseClient = (cfg && cfg.url !== 'YOUR_SUPABASE_PROJECT_URL')
+    ? window.supabase.createClient(cfg.url, cfg.anonKey)
+    : null;
+
   const form = document.getElementById('contact-form');
   const submitBtn = document.getElementById('submit-btn');
   const formSuccess = document.getElementById('form-success');
@@ -289,6 +304,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function setLoading(loading) {
+    const btnText = submitBtn.querySelector('.btn-text');
+    const btnIcon = submitBtn.querySelector('.btn-icon');
+    const btnLoader = submitBtn.querySelector('.btn-loader');
+
+    if (loading) {
+      btnText.textContent = 'Sending...';
+      btnIcon.style.display = 'none';
+      btnLoader.style.display = 'flex';
+      submitBtn.disabled = true;
+    } else {
+      btnText.textContent = 'Send Message';
+      btnIcon.style.display = 'flex';
+      btnLoader.style.display = 'none';
+      submitBtn.disabled = false;
+    }
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clearErrors();
@@ -298,52 +331,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const subject = document.getElementById('contact-subject').value.trim();
     const message = document.getElementById('contact-message').value.trim();
 
+    // ---- Client-side validation ----
     let valid = true;
-
     if (!name) { setError('contact-name', 'name-error', 'Name is required.'); valid = false; }
     if (!email) { setError('contact-email', 'email-error', 'Email is required.'); valid = false; }
     else if (!validateEmail(email)) { setError('contact-email', 'email-error', 'Please enter a valid email.'); valid = false; }
     if (!subject) { setError('contact-subject', 'subject-error', 'Subject is required.'); valid = false; }
     if (!message || message.length < 10) { setError('contact-message', 'message-error', 'Message must be at least 10 characters.'); valid = false; }
-
     if (!valid) return;
 
-    // Show loading
-    const btnText = submitBtn.querySelector('.btn-text');
-    const btnIcon = submitBtn.querySelector('.btn-icon');
-    const btnLoader = submitBtn.querySelector('.btn-loader');
-
-    btnText.textContent = 'Sending...';
-    btnIcon.style.display = 'none';
-    btnLoader.style.display = 'flex';
-    submitBtn.disabled = true;
-
-    try {
-      const formData = new FormData(form);
-      const response = await fetch(form.action, {
-        method: 'POST',
-        body: formData,
-        headers: { 'Accept': 'application/json' }
-      });
-
-      if (response.ok) {
-        form.reset();
-        formSuccess.style.display = 'flex';
-        setTimeout(() => { formSuccess.style.display = 'none'; }, 5000);
-      } else {
-        const data = await response.json();
-        const errMsg = data.errors ? data.errors.map(e => e.message).join(', ') : 'Submission failed. Please try emailing me directly.';
-        setError('contact-message', 'message-error', errMsg);
-      }
-    } catch (err) {
-      setError('contact-message', 'message-error', 'Network error. Please try emailing me directly at avi620nash@gmail.com');
+    // ---- Supabase not configured yet ----
+    if (!supabaseClient) {
+      setError('contact-message', 'message-error',
+        'Contact form is not yet configured. Please email me directly at avi620nash@gmail.com');
+      return;
     }
 
-    btnText.textContent = 'Send Message';
-    btnIcon.style.display = 'flex';
-    btnLoader.style.display = 'none';
-    submitBtn.disabled = false;
+    setLoading(true);
+
+    try {
+      const { error } = await supabaseClient
+        .from(cfg.table)
+        .insert([{ name, email, subject, message }]);
+
+      if (error) throw error;
+
+      // ---- Success ----
+      form.reset();
+      formSuccess.style.display = 'flex';
+      setTimeout(() => { formSuccess.style.display = 'none'; }, 5000);
+
+    } catch (err) {
+      console.error('[Contact Form] Supabase error:', err);
+      setError('contact-message', 'message-error',
+        'Something went wrong. Please try emailing me directly at avi620nash@gmail.com');
+    } finally {
+      setLoading(false);
+    }
   });
+
 
   // ---- FOOTER YEAR ----
   const yearEl = document.getElementById('footer-year');
